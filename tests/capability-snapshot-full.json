@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-09T00:00:00Z",
+  "versions": {
+    "sillytavern": "1.18.0",
+    "tavernHelper": "4.5.0"
+  },
+  "symbols": [
+    "SillyTavern.getContext",
+    "SillyTavern.getContext.chatMetadata",
+    "SillyTavern.getContext.saveMetadata",
+    "SillyTavern.getContext.eventSource",
+    "SillyTavern.getContext.event_types",
+    "SillyTavern.getContext.setExtensionPrompt",
+    "SillyTavern.getContext.generateQuietPrompt",
+    "TraceMemory.messageSaveAdapter",
+    "TraceMemory.slashCommandAdapter",
+    "SillyTavern.getContext.executeSlashCommandsWithOptions"
+  ]
+}

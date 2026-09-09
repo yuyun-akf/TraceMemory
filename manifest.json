@@ -1,0 +1,17 @@
+{
+  "display_name": "留痕记忆 TraceMemory",
+  "loading_order": 20,
+  "dependencies": [],
+  "js": "index.js",
+  "author": "芋圆",
+  "version": "0.1.0-alpha.1",
+  "auto_update": false,
+  "hooks": {
+    "activate": "onActivate",
+    "enable": "onEnable",
+    "disable": "onDisable"
+  },
+  "generate_interceptor": "traceMemoryPromptInterceptor",
+  "css": "style.css",
+  "minimum_client_version": "1.18.0"
+}

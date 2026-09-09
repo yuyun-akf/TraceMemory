@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "minimum": {
+    "sillytavern": "1.18.0",
+    "tavernHelper": null
+  },
+  "requirements": [
+    {
+      "id": "host-context",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern.getContext",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "chat-metadata",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern.getContext.chatMetadata",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "chat-metadata-save",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern.getContext.saveMetadata",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "host-events",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern.getContext.eventSource",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "host-event-types",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern.getContext.event_types",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "prompt-injection",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern.getContext.setExtensionPrompt",
+      "required": true,
+      "fallback": null
+    },
+    {
+      "id": "quiet-generation",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern.getContext.generateQuietPrompt",
+      "required": false,
+      "fallback": "同轮零额外调用模式仍可用；后台和混合归档模式停用。"
+    },
+    {
+      "id": "message-save",
+      "owner": "provider",
+      "symbol": "TraceMemory.messageSaveAdapter",
+      "required": false,
+      "fallback": "同轮与混合模式停用，后台独立总结模式仍可使用。"
+    },
+    {
+      "id": "slash-hide",
+      "owner": "provider",
+      "symbol": "TraceMemory.slashCommandAdapter",
+      "required": false,
+      "fallback": "自动隐藏停用，记忆仍正常保存和注入。"
+    }
+  ]
+}

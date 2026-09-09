@@ -1,0 +1,142 @@
+[data-extension-id="trace-memory"] {
+  contain: content;
+  color: var(--SmartThemeBodyColor, inherit);
+  font: inherit;
+}
+
+.trace-memory-content {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.65rem 0.25rem 0.9rem;
+}
+
+.trace-memory-panel small {
+  margin-inline-start: 0.35rem;
+  color: var(--SmartThemeEmColor, currentColor);
+  font: inherit;
+  font-size: 0.72em;
+  font-weight: 400;
+  opacity: 0.72;
+}
+
+.trace-memory-lead,
+.trace-memory-status {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.trace-memory-section,
+.trace-memory-status,
+.trace-memory-details {
+  padding: 0.75rem;
+  border: 1px solid var(--SmartThemeBorderColor, rgba(127, 127, 127, 0.35));
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor, transparent) 64%, transparent);
+}
+
+.trace-memory-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.trace-memory-row--switch {
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+}
+
+.trace-memory-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.trace-memory-grid > label:not(.trace-memory-check) {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.trace-memory-check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  line-height: 1.4;
+}
+
+.trace-memory-panel select,
+.trace-memory-panel input,
+.trace-memory-panel button {
+  font: inherit;
+}
+
+.trace-memory-panel select {
+  width: 100%;
+  margin-top: 0.3rem;
+}
+
+.trace-memory-panel input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.trace-memory-status {
+  white-space: pre-line;
+  border-inline-start: 0.28rem solid var(--SmartThemeQuoteColor, currentColor);
+}
+
+.trace-memory-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.trace-memory-actions .menu_button {
+  min-height: 2.55rem;
+  height: auto;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.trace-memory-danger {
+  color: var(--crimson70a, #c66) !important;
+}
+
+.trace-memory-details summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.trace-memory-details pre {
+  max-height: 18rem;
+  margin: 0.7rem 0 0;
+  padding: 0.7rem;
+  overflow: auto;
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--SmartThemeChatTintColor, transparent) 72%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 0.88em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mes.trace-memory-owned-hidden {
+  display: none !important;
+}
+
+@media (max-width: 620px) {
+  .trace-memory-grid,
+  .trace-memory-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@supports not (background: color-mix(in srgb, white 50%, transparent)) {
+  .trace-memory-section,
+  .trace-memory-status,
+  .trace-memory-details,
+  .trace-memory-details pre {
+    background: var(--SmartThemeBlurTintColor, transparent);
+  }
+}
