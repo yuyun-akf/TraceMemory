@@ -17,6 +17,8 @@ import {
   createState,
   detectMemoryDrift,
   discardUnarchivedSources,
+  editableMemoryRecords,
+  hashText,
   isEligibleAssistantMessage,
   markNeedsReview,
   migrateState,
@@ -26,10 +28,13 @@ import {
   sourceIdentity,
   stateStats,
   stripMemoryPacket,
+  updateMemoryRecord,
 } from './src/core.mjs';
 
-const VERSION = '0.1.0-alpha.1';
+const VERSION = '0.1.0-alpha.2';
 const PANEL_ID = 'trace-memory-settings';
+const MESSAGE_PANEL_CLASS = 'trace-memory-message-panel';
+const CUSTOM_STYLE_ID = 'trace-memory-custom-message-style';
 const INSTANCE_KEY = '__traceMemoryExtensionV1';
 const IN_CHAT_PROMPT_POSITION = 1;
 const SYSTEM_PROMPT_ROLE = 0;
@@ -43,6 +48,9 @@ let lastGenerationType = '';
 let listeners = [];
 let initializeTimer = null;
 let cardConflictCache = new WeakMap();
+let memoryEditBusy = false;
+let chatTokenCounter = 0;
+let chatTokens = new WeakMap();
 
 function getContext() {
   return globalThis.SillyTavern?.getContext?.() ?? null;
@@ -114,6 +122,13 @@ function isCurrentChatBinding(binding) {
 
 function assertCurrentChatBinding(binding) {
   if (!isCurrentChatBinding(binding)) throw new Error('操作期间聊天已切换；本次异步结果已丢弃，没有写入其他聊天');
+}
+
+function chatBindingToken(ctx) {
+  const metadata = ctx?.chatMetadata;
+  if (!metadata || typeof metadata !== 'object') return '';
+  if (!chatTokens.has(metadata)) chatTokens.set(metadata, `${ctx?.characterId ?? 'unknown'}:${++chatTokenCounter}`);
+  return chatTokens.get(metadata);
 }
 
 function getState(ctx, create = true) {
@@ -207,6 +222,7 @@ function preflight(ctx = getContext()) {
     persistMessage: Boolean(messageSaveFunction(ctx)),
     eventSource: observe('SillyTavern.getContext.eventSource', Boolean(ctx?.eventSource && typeof ctx.eventSource.on === 'function')),
     eventTypes: observe('SillyTavern.getContext.event_types', Boolean(ctx?.event_types && typeof ctx.event_types === 'object')),
+    messageDom: observe('SillyTavern DOM #chat with .mes message nodes', typeof document !== 'undefined' && Boolean(document.querySelector('#chat'))),
     soloChat: isSoloChat(ctx),
     possibleCardMemoryConflict: possibleCardMemoryConflict(ctx),
   };
@@ -230,6 +246,7 @@ function preflight(ctx = getContext()) {
       inline: checks.persistMessage,
       background: checks.generateQuietPrompt,
       autoHide: Boolean(slashCommandFunction(ctx)),
+      messageMemory: checks.messageDom,
     },
     notes: [
       '通过自检只代表接口名称存在；实机行为仍需跑一轮验证。',
@@ -268,17 +285,26 @@ function panelHtml() {
             <label>保留最近消息<input id="trace-memory-keep-visible" class="text_pole" type="number" min="2" max="50" inputmode="numeric"></label>
             <label class="trace-memory-check"><input id="trace-memory-auto-hide" type="checkbox"> 自动隐藏已归档楼层</label>
             <label class="trace-memory-check"><input id="trace-memory-collapse-hidden" type="checkbox"> 页面内折叠本扩展隐藏楼层</label>
+            <label class="trace-memory-check"><input id="trace-memory-show-message-memory" type="checkbox"> 在对应正文下显示记忆折叠栏</label>
           </section>
           <section class="trace-memory-section">
             <div class="trace-memory-row trace-memory-row--switch"><label for="trace-memory-default-enabled">新聊天默认启用</label><input id="trace-memory-default-enabled" type="checkbox"></div>
             <label for="trace-memory-default-mode">新聊天默认模式</label>
             <select id="trace-memory-default-mode" class="text_pole"><option value="inline">同轮随写</option><option value="background">后台总结</option><option value="hybrid">混合归档</option></select>
+            <label class="trace-memory-check trace-memory-default-message-toggle"><input id="trace-memory-default-show-message-memory" type="checkbox"> 新聊天默认显示正文记忆栏</label>
           </section>
           <div id="trace-memory-status" class="trace-memory-status" role="status"></div>
           <div class="trace-memory-actions">
             <button id="trace-memory-preflight" class="menu_button">环境自检</button><button id="trace-memory-repair-last" class="menu_button">补写漏记（额外调用）</button><button id="trace-memory-archive-now" class="menu_button">归档到期批次</button><button id="trace-memory-restore-hidden" class="menu_button">恢复本扩展隐藏楼层</button><button id="trace-memory-export" class="menu_button">导出当前记忆</button><button id="trace-memory-reset" class="menu_button trace-memory-danger">重置当前聊天记忆</button>
           </div>
-          <details class="trace-memory-details"><summary>记忆预览</summary><pre id="trace-memory-preview"></pre></details>
+          <details id="trace-memory-editor-details" class="trace-memory-details"><summary>记忆编辑器</summary><div id="trace-memory-editor" class="trace-memory-editor"></div></details>
+          <details class="trace-memory-details"><summary>正文折叠栏美化</summary>
+            <div class="trace-memory-style-editor">
+              <p>已自带简洁样式。需要自定义时，可在下面填写 CSS；建议只使用 <code>.trace-memory-message-panel</code> 开头的选择器。</p>
+              <textarea id="trace-memory-custom-css" class="text_pole" rows="7" spellcheck="false" placeholder=".trace-memory-message-panel {\n  --tm-accent: #b99a7a;\n  --tm-radius: 10px;\n}"></textarea>
+              <div class="trace-memory-style-actions"><button id="trace-memory-apply-css" class="menu_button" type="button">应用自定义样式</button><button id="trace-memory-reset-css" class="menu_button" type="button">恢复默认样式</button></div>
+            </div>
+          </details>
           <details class="trace-memory-details"><summary>环境报告</summary><pre id="trace-memory-preflight-output">尚未运行</pre></details>
         </div>
       </div>
@@ -307,19 +333,285 @@ function setDisabled(id, disabled) {
   if (element) element.disabled = disabled;
 }
 
-function prettyState(state) {
-  if (!state) return '当前没有可用的单人角色聊天。';
-  const sections = [`短期记忆 ${state.short.length}/${state.config.batchSize}`];
-  for (const [index, item] of state.short.entries()) sections.push(`${index + 1}. ${item.at}｜${item.text}`);
-  sections.push(`\n永久记录 ${Object.values(state.permanent).reduce((sum, rows) => sum + rows.length, 0)}条`);
-  for (const [label, key] of [['承诺', 'promises'], ['礼物', 'gifts'], ['待完成约定', 'pendingAgreements'], ['已完成约定', 'completedAgreements'], ['暗线', 'clues']]) {
-    for (const item of state.permanent[key]) sections.push(`${label} ${item.id}｜${item.text}`);
+function normalizeCustomCss(value) {
+  const css = String(value ?? '').replace(/\r\n?/g, '\n').replace(/\u0000/g, '');
+  if (css.length > 20000) throw new Error('自定义样式最多20000字');
+  if (/@import\b|url\s*\(|expression\s*\(|javascript\s*:|-moz-binding\b|behavior\s*:/i.test(css)) {
+    throw new Error('自定义样式不能包含外部资源、脚本式表达式或浏览器行为规则');
   }
-  sections.push(`\n长期归档 ${state.archives.length}批`);
-  for (const item of state.archives) sections.push(`第${item.batch}批｜${item.summary}\n日记｜${item.diary}`);
-  if (state.pending.length) sections.push(`\n待补写 ${state.pending.length}条：${state.pending.map(item => `#${item.messageIndex}`).join('、')}`);
-  if (state.needsReview) sections.push(`\n⚠ 已锁定：${state.reviewReason}`);
-  return sections.join('\n');
+  return css;
+}
+
+function applyCustomMessageCss(settingsInput = null) {
+  if (typeof document === 'undefined') return;
+  const ctx = getContext();
+  const settings = settingsInput ?? (ctx ? getSettings(ctx, false) : normalizeSettings());
+  let css = '';
+  try {
+    css = normalizeCustomCss(settings.customMessageCss ?? '');
+  } catch {
+    byId(CUSTOM_STYLE_ID)?.remove();
+    return;
+  }
+  let style = byId(CUSTOM_STYLE_ID);
+  if (!css.trim()) {
+    style?.remove();
+    return;
+  }
+  if (!style) {
+    style = document.createElement('style');
+    style.id = CUSTOM_STYLE_ID;
+    document.head?.append(style);
+  }
+  if (style.textContent !== css) style.textContent = css;
+}
+
+function createMemoryRecordEditor(descriptor, compact = false, chatToken = '') {
+  const form = document.createElement('form');
+  form.className = `trace-memory-record-editor${compact ? ' trace-memory-record-editor--compact' : ''}`;
+  form.dataset.recordLocator = JSON.stringify(descriptor.locator);
+  form.dataset.dirty = 'false';
+  form.dataset.chatToken = chatToken;
+
+  const header = document.createElement('div');
+  header.className = 'trace-memory-record-header';
+  const title = document.createElement('strong');
+  title.textContent = descriptor.title;
+  header.append(title);
+  if (descriptor.subtitle) {
+    const subtitle = document.createElement('span');
+    subtitle.textContent = descriptor.subtitle;
+    header.append(subtitle);
+  }
+  form.append(header);
+
+  for (const field of descriptor.fields) {
+    const label = document.createElement('label');
+    label.className = 'trace-memory-record-field';
+    const caption = document.createElement('span');
+    caption.textContent = field.label;
+    label.append(caption);
+    let control;
+    if (Array.isArray(field.options)) {
+      control = document.createElement('select');
+      for (const optionValue of field.options) {
+        const option = document.createElement('option');
+        option.value = optionValue;
+        option.textContent = optionValue;
+        control.append(option);
+      }
+      control.value = field.value;
+    } else if (field.multiline) {
+      control = document.createElement('textarea');
+      control.rows = compact ? (field.name === 'text' ? 2 : 3) : (field.name === 'text' ? 3 : 5);
+    } else {
+      control = document.createElement('input');
+      control.type = 'text';
+    }
+    control.classList.add('text_pole');
+    control.dataset.memoryField = field.name;
+    control.value = field.value;
+    if (field.maximum) control.maxLength = field.maximum;
+    label.append(control);
+    form.append(label);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'trace-memory-record-actions';
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'menu_button';
+  save.textContent = '保存修改';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'menu_button';
+  cancel.textContent = '放弃未保存';
+  const hint = document.createElement('span');
+  hint.textContent = '保存后两处同步';
+  actions.append(save, cancel, hint);
+  form.append(actions);
+
+  form.addEventListener('input', () => { form.dataset.dirty = 'true'; });
+  form.addEventListener('change', () => { form.dataset.dirty = 'true'; });
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    saveMemoryRecordForm(form).catch(error => notify('error', error.message));
+  });
+  cancel.addEventListener('click', () => {
+    form.dataset.dirty = 'false';
+    const container = form.parentElement;
+    if (container) delete container.dataset.renderKey;
+    refreshPanel();
+  });
+  return form;
+}
+
+async function saveMemoryRecordForm(form) {
+  if (memoryEditBusy) throw new Error('上一条记忆仍在保存，请稍等');
+  const ctx = getContext();
+  if (!form.dataset.chatToken || form.dataset.chatToken !== chatBindingToken(ctx)) {
+    throw new Error('聊天已经切换，这个编辑框属于上一段聊天；请在当前聊天重新打开记忆编辑器');
+  }
+  const current = getState(ctx, false);
+  if (!current) throw new Error('当前没有可编辑的单人聊天记忆');
+  const binding = captureChatBinding(ctx);
+  const previous = ctx.chatMetadata[STATE_KEY];
+  const draft = migrateState(previous, getSettings(ctx, false));
+  let locator;
+  try {
+    locator = JSON.parse(form.dataset.recordLocator ?? '');
+  } catch {
+    throw new Error('记忆记录定位信息损坏，请重新打开面板');
+  }
+  const patch = {};
+  for (const control of form.querySelectorAll('[data-memory-field]')) patch[control.dataset.memoryField] = control.value;
+  updateMemoryRecord(draft, locator, patch);
+  assertCurrentChatBinding(binding);
+
+  const button = form.querySelector('button[type="submit"]');
+  memoryEditBusy = true;
+  if (button) button.disabled = true;
+  ctx.chatMetadata[STATE_KEY] = draft;
+  try {
+    await saveState(ctx);
+    form.dataset.dirty = 'false';
+    notify('success', '记忆修改已同步');
+  } catch (error) {
+    ctx.chatMetadata[STATE_KEY] = previous;
+    throw error;
+  } finally {
+    memoryEditBusy = false;
+    if (button) button.disabled = false;
+    refreshPanel();
+  }
+}
+
+function renderRecordList(container, descriptors, options = {}) {
+  if (!container) return;
+  const chatToken = String(options.chatToken ?? '');
+  if (container.dataset.chatToken === chatToken && container.querySelector('[data-dirty="true"]')) return;
+  const renderKey = hashText(JSON.stringify({ descriptors, notice: options.notice ?? '', intro: options.intro ?? '', chatToken }));
+  if (container.dataset.renderKey === renderKey) return;
+  const fragment = document.createDocumentFragment();
+  if (options.intro) {
+    const intro = document.createElement('p');
+    intro.className = 'trace-memory-editor-intro';
+    intro.textContent = options.intro;
+    fragment.append(intro);
+  }
+  if (options.notice) {
+    const notice = document.createElement('p');
+    notice.className = 'trace-memory-record-notice';
+    notice.textContent = options.notice;
+    fragment.append(notice);
+  }
+  if (!descriptors.length) {
+    const empty = document.createElement('p');
+    empty.className = 'trace-memory-editor-empty';
+    empty.textContent = options.emptyText ?? '当前还没有可编辑的记忆记录。';
+    fragment.append(empty);
+  } else {
+    let previousSection = '';
+    for (const descriptor of descriptors) {
+      if (!options.compact && descriptor.section !== previousSection) {
+        const heading = document.createElement('h4');
+        heading.textContent = descriptor.section;
+        fragment.append(heading);
+        previousSection = descriptor.section;
+      }
+      fragment.append(createMemoryRecordEditor(descriptor, Boolean(options.compact), chatToken));
+    }
+  }
+  container.replaceChildren(fragment);
+  container.dataset.renderKey = renderKey;
+  container.dataset.chatToken = chatToken;
+}
+
+function renderBackendMemoryEditor(state) {
+  const details = byId('trace-memory-editor-details');
+  const container = byId('trace-memory-editor');
+  if (!container || !details?.open) return;
+  const descriptors = editableMemoryRecords(state);
+  const notice = state?.pending?.length
+    ? `另有${state.pending.length}条待补写：${state.pending.map(item => `第${item.messageIndex}楼`).join('、')}`
+    : (state?.needsReview ? `当前有源消息变更锁：${state.reviewReason}` : '');
+  renderRecordList(container, descriptors, {
+    chatToken: chatBindingToken(getContext()),
+    intro: '这里与正文下方折叠栏读取同一份聊天记忆；任意一边保存，另一边会同步刷新。',
+    notice,
+    emptyText: state ? '当前还没有可编辑的记忆记录。' : '当前没有可用的单人角色聊天。',
+  });
+}
+
+function findMessageNode(messageIndex) {
+  if (typeof document === 'undefined') return null;
+  return document.querySelector(`.mes[mesid="${messageIndex}"]`)
+    ?? document.querySelector(`.mes[data-message-id="${messageIndex}"]`);
+}
+
+function removeMessageMemoryPanels() {
+  if (typeof document === 'undefined') return;
+  document.querySelectorAll(`.${MESSAGE_PANEL_CLASS}`).forEach(node => node.remove());
+}
+
+function syncMessageMemoryPanels(ctx, state) {
+  if (typeof document === 'undefined') return;
+  if (!state?.config.showMessageMemory || !Array.isArray(ctx?.chat) || ctx?.groupId) {
+    removeMessageMemoryPanels();
+    return;
+  }
+
+  const descriptorsByMessage = new Map();
+  for (const descriptor of editableMemoryRecords(state)) {
+    for (const messageIndex of descriptor.messageIndices) {
+      if (!isEligibleAssistantMessage(ctx.chat[messageIndex])) continue;
+      const rows = descriptorsByMessage.get(messageIndex) ?? [];
+      rows.push(descriptor);
+      descriptorsByMessage.set(messageIndex, rows);
+    }
+  }
+  const pendingByMessage = new Map();
+  for (const pending of state.pending ?? []) {
+    if (Number.isInteger(pending?.messageIndex) && isEligibleAssistantMessage(ctx.chat[pending.messageIndex])) {
+      pendingByMessage.set(pending.messageIndex, pending);
+    }
+  }
+  const relevant = new Set([...descriptorsByMessage.keys(), ...pendingByMessage.keys()]);
+
+  for (const panel of document.querySelectorAll(`.${MESSAGE_PANEL_CLASS}`)) {
+    const messageIndex = Number.parseInt(panel.dataset.messageIndex, 10);
+    if (!relevant.has(messageIndex) || !findMessageNode(messageIndex)?.contains(panel)) panel.remove();
+  }
+
+  for (const messageIndex of [...relevant].sort((left, right) => left - right)) {
+    const messageNode = findMessageNode(messageIndex);
+    if (!messageNode) continue;
+    let panel = messageNode.querySelector(`.${MESSAGE_PANEL_CLASS}[data-message-index="${messageIndex}"]`);
+    if (!panel) {
+      panel = document.createElement('details');
+      panel.className = MESSAGE_PANEL_CLASS;
+      panel.dataset.messageIndex = String(messageIndex);
+      const summary = document.createElement('summary');
+      const content = document.createElement('div');
+      content.className = 'trace-memory-message-content';
+      panel.append(summary, content);
+      const messageText = messageNode.querySelector('.mes_text');
+      if (messageText) messageText.insertAdjacentElement('afterend', panel);
+      else (messageNode.querySelector('.mes_block') ?? messageNode).append(panel);
+    }
+    const descriptors = descriptorsByMessage.get(messageIndex) ?? [];
+    const pending = pendingByMessage.get(messageIndex);
+    const labels = [...new Set(descriptors.map(item => item.section))];
+    const summary = panel.firstElementChild;
+    if (summary) summary.textContent = `留痕记忆${labels.length ? ` · ${labels.join(' / ')}` : ' · 待补写'}`;
+    const notice = pending ? `这轮记忆待补写：${pending.reason}` : '';
+    renderRecordList(panel.querySelector('.trace-memory-message-content'), descriptors, {
+      chatToken: chatBindingToken(ctx),
+      compact: true,
+      notice,
+      emptyText: '本轮暂时没有可编辑的记忆。',
+    });
+  }
 }
 
 function refreshPanel() {
@@ -336,9 +628,11 @@ function refreshPanel() {
   assign('trace-memory-keep-visible', 'value', state?.config.keepVisible ?? settings.keepVisible);
   assign('trace-memory-auto-hide', 'checked', state?.config.autoHide ?? settings.autoHide);
   assign('trace-memory-collapse-hidden', 'checked', state?.config.collapseOwnedHidden ?? settings.collapseOwnedHidden);
+  assign('trace-memory-show-message-memory', 'checked', state?.config.showMessageMemory ?? settings.showMessageMemory);
   assign('trace-memory-default-enabled', 'checked', settings.defaultEnabled);
   assign('trace-memory-default-mode', 'value', settings.defaultMode);
-  for (const id of ['trace-memory-current-enabled', 'trace-memory-mode', 'trace-memory-batch-size', 'trace-memory-keep-visible', 'trace-memory-auto-hide', 'trace-memory-collapse-hidden']) setDisabled(id, !supported);
+  assign('trace-memory-default-show-message-memory', 'checked', settings.showMessageMemory);
+  for (const id of ['trace-memory-current-enabled', 'trace-memory-mode', 'trace-memory-batch-size', 'trace-memory-keep-visible', 'trace-memory-auto-hide', 'trace-memory-collapse-hidden', 'trace-memory-show-message-memory']) setDisabled(id, !supported);
   setDisabled('trace-memory-repair-last', !supported || !report.readiness.background || !state?.pending.length);
   setDisabled('trace-memory-archive-now', !supported || !report.readiness.background || !state?.archiveDue);
   setDisabled('trace-memory-restore-hidden', !supported || !report.readiness.autoHide || !ownedHiddenIndices(ctx).length);
@@ -356,13 +650,17 @@ function refreshPanel() {
       if ((state.mode === MODES.INLINE || state.mode === MODES.HYBRID) && !report.readiness.inline) issues.push('同轮记忆缺少安全保存接口');
       if ((state.mode === MODES.BACKGROUND || state.mode === MODES.HYBRID) && !report.readiness.background) issues.push('后台调用接口不可用');
       if (state.config.autoHide && !report.readiness.autoHide) issues.push('自动隐藏接口不可用');
+      if (state.config.showMessageMemory && !report.readiness.messageMemory) issues.push('未检测到聊天消息区域，正文记忆栏暂不显示');
       if (report.checks.possibleCardMemoryConflict) issues.push('卡内可能仍有另一套记忆规则，请确认已关闭对应词条');
       if (state.needsReview) issues.push(`源消息变更锁：${state.reviewReason}`);
       status.textContent = `${state.enabled ? '已启用' : '已暂停'}｜${modeName}｜短记忆 ${stats.short}/${stats.batchSize}｜归档 ${stats.archives}批｜隐藏 ${ownedHiddenIndices(ctx).length}条${issues.length ? `\n⚠ ${issues.join('；')}` : ''}`;
     }
   }
-  const preview = byId('trace-memory-preview');
-  if (preview) preview.textContent = prettyState(state);
+  const customCss = byId('trace-memory-custom-css');
+  if (customCss && customCss.dataset.dirty !== 'true' && document.activeElement !== customCss) customCss.value = settings.customMessageCss;
+  applyCustomMessageCss(settings);
+  renderBackendMemoryEditor(state);
+  syncMessageMemoryPanels(ctx, state);
   applyOwnedHiddenDom(ctx, state);
 }
 
@@ -391,12 +689,45 @@ function bindPanelActions() {
   onChange('trace-memory-keep-visible', event => updateCurrentState(state => { state.config.keepVisible = Math.min(50, Math.max(2, Number.parseInt(event.target.value, 10) || 6)); }));
   onChange('trace-memory-auto-hide', event => updateCurrentState(state => { state.config.autoHide = event.target.checked; }));
   onChange('trace-memory-collapse-hidden', event => updateCurrentState(state => { state.config.collapseOwnedHidden = event.target.checked; }));
+  onChange('trace-memory-show-message-memory', event => updateCurrentState(state => { state.config.showMessageMemory = event.target.checked; }));
   onChange('trace-memory-default-enabled', event => { const ctx = getContext(); updateSettings(ctx, { defaultEnabled: event.target.checked }); refreshPanel(); });
   onChange('trace-memory-default-mode', event => {
     const error = modeCapabilityError(event.target.value);
     if (error) { refreshPanel(); throw new Error(error); }
     const ctx = getContext();
     updateSettings(ctx, { defaultMode: event.target.value });
+    refreshPanel();
+  });
+  onChange('trace-memory-default-show-message-memory', event => {
+    const ctx = getContext();
+    updateSettings(ctx, { showMessageMemory: event.target.checked });
+    refreshPanel();
+  });
+  byId('trace-memory-editor-details')?.addEventListener('toggle', refreshPanel);
+  const customCss = byId('trace-memory-custom-css');
+  customCss?.addEventListener('input', () => { customCss.dataset.dirty = 'true'; });
+  byId('trace-memory-apply-css')?.addEventListener('click', () => {
+    try {
+      const ctx = getContext();
+      const css = normalizeCustomCss(customCss?.value ?? '');
+      const settings = updateSettings(ctx, { customMessageCss: css });
+      if (customCss) customCss.dataset.dirty = 'false';
+      applyCustomMessageCss(settings);
+      notify('success', '正文记忆栏样式已应用');
+      refreshPanel();
+    } catch (error) {
+      notify('error', error.message);
+    }
+  });
+  byId('trace-memory-reset-css')?.addEventListener('click', () => {
+    const ctx = getContext();
+    const settings = updateSettings(ctx, { customMessageCss: '' });
+    if (customCss) {
+      customCss.value = '';
+      customCss.dataset.dirty = 'false';
+    }
+    applyCustomMessageCss(settings);
+    notify('success', '已恢复正文记忆栏默认样式');
     refreshPanel();
   });
   byId('trace-memory-preflight')?.addEventListener('click', () => { const output = byId('trace-memory-preflight-output'); if (output) output.textContent = JSON.stringify(preflight(), null, 2); });
@@ -779,6 +1110,11 @@ async function dispose() {
   clearPrompt();
   unbindHostEvents();
   byId(PANEL_ID)?.remove();
+  removeMessageMemoryPanels();
+  byId(CUSTOM_STYLE_ID)?.remove();
+  memoryEditBusy = false;
+  chatTokens = new WeakMap();
+  chatTokenCounter = 0;
   if (typeof document !== 'undefined') document.querySelectorAll('.trace-memory-owned-hidden').forEach(node => node.classList.remove('trace-memory-owned-hidden'));
 }
 

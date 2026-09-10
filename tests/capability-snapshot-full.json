@@ -12,6 +12,7 @@
     "SillyTavern.getContext.eventSource",
     "SillyTavern.getContext.event_types",
     "SillyTavern.getContext.setExtensionPrompt",
+    "SillyTavern DOM #chat with .mes message nodes",
     "SillyTavern.getContext.generateQuietPrompt",
     "TraceMemory.messageSaveAdapter",
     "TraceMemory.slashCommandAdapter",

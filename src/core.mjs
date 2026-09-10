@@ -18,8 +18,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   autoHide: true,
   keepVisible: 6,
   collapseOwnedHidden: true,
+  showMessageMemory: true,
   maxPromptCharacters: 14000,
   showToasts: true,
+  customMessageCss: '',
 });
 
 const PERMANENT_BUCKETS = Object.freeze({
@@ -51,6 +53,11 @@ function asText(value, maximum = 2000) {
   return value.replace(/\r\n?/g, '\n').replace(/\u0000/g, '').trim().slice(0, maximum);
 }
 
+function asCss(value, maximum = 20000) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\r\n?/g, '\n').replace(/\u0000/g, '').slice(0, maximum);
+}
+
 function normalizeForDedupe(value) {
   return asText(value, 2000).replace(/\s+/g, '').replace(/[，。！？；：、“”‘’（）()【】\[\]]/g, '').toLowerCase();
 }
@@ -66,8 +73,10 @@ export function normalizeSettings(input = {}) {
     autoHide: asBoolean(input.autoHide, DEFAULT_SETTINGS.autoHide),
     keepVisible: asInteger(input.keepVisible, DEFAULT_SETTINGS.keepVisible, 2, 50),
     collapseOwnedHidden: asBoolean(input.collapseOwnedHidden, DEFAULT_SETTINGS.collapseOwnedHidden),
+    showMessageMemory: asBoolean(input.showMessageMemory, DEFAULT_SETTINGS.showMessageMemory),
     maxPromptCharacters: asInteger(input.maxPromptCharacters, DEFAULT_SETTINGS.maxPromptCharacters, 3000, 50000),
     showToasts: asBoolean(input.showToasts, DEFAULT_SETTINGS.showToasts),
+    customMessageCss: asCss(input.customMessageCss, 20000),
   };
 }
 
@@ -82,6 +91,7 @@ export function createState(settingsInput = {}) {
       autoHide: settings.autoHide,
       keepVisible: settings.keepVisible,
       collapseOwnedHidden: settings.collapseOwnedHidden,
+      showMessageMemory: settings.showMessageMemory,
       maxPromptCharacters: settings.maxPromptCharacters,
     },
     short: [],
@@ -116,6 +126,7 @@ export function createState(settingsInput = {}) {
       lastStoryTime: '',
       lastError: '',
       lastSuccessAt: '',
+      lastManualEditAt: '',
     },
   };
 }
@@ -141,6 +152,7 @@ export function migrateState(input, settingsInput = {}) {
   merged.config.keepVisible = asInteger(merged.config.keepVisible, fresh.config.keepVisible, 2, 50);
   merged.config.autoHide = asBoolean(merged.config.autoHide, fresh.config.autoHide);
   merged.config.collapseOwnedHidden = asBoolean(merged.config.collapseOwnedHidden, fresh.config.collapseOwnedHidden);
+  merged.config.showMessageMemory = asBoolean(merged.config.showMessageMemory, fresh.config.showMessageMemory);
   merged.config.maxPromptCharacters = asInteger(merged.config.maxPromptCharacters, fresh.config.maxPromptCharacters, 3000, 50000);
   for (const field of ['short', 'archives', 'pending']) {
     if (!Array.isArray(merged[field])) merged[field] = [];
@@ -440,6 +452,145 @@ export function discardUnarchivedSources(state, sourceKeysInput) {
   state.archiveDue = state.short.length >= state.config.batchSize;
   const afterPermanent = Object.values(state.permanent).reduce((sum, records) => sum + records.length, 0);
   return { shortRemoved: beforeShort - state.short.length, permanentRemoved: beforePermanent - afterPermanent };
+}
+
+const EDITOR_BUCKET_LABELS = Object.freeze({
+  promises: '承诺',
+  gifts: '礼物',
+  pendingAgreements: '待完成约定',
+  completedAgreements: '已完成约定',
+  clues: '暗线与伏笔',
+});
+
+const CLUE_STATUSES = Object.freeze(['未触发', '已露线索', '角色怀疑中', '已确认', '已回收']);
+
+function messageIndexForSource(state, sourceKey) {
+  const fromLedger = state?.ledger?.[sourceKey]?.source?.messageIndex;
+  if (Number.isInteger(fromLedger)) return fromLedger;
+  const match = /^m(\d+):/.exec(String(sourceKey ?? ''));
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+function textField(name, label, value, maximum, multiline = true) {
+  return { name, label, value: String(value ?? ''), maximum, multiline };
+}
+
+/**
+ * Returns UI-neutral descriptors for every record whose authoritative value can
+ * be edited. Both the settings editor and the under-message editor render these
+ * descriptors, so neither view owns a second copy of memory data.
+ */
+export function editableMemoryRecords(state) {
+  if (!state || typeof state !== 'object') return [];
+  const records = [];
+
+  for (const item of Array.isArray(state.short) ? state.short : []) {
+    const messageIndex = item?.source?.messageIndex;
+    records.push({
+      key: `short:${item.id}`,
+      locator: { kind: 'short', id: item.id },
+      section: '本批短期记忆',
+      title: Number.isInteger(messageIndex) ? `第${messageIndex}楼短期记忆` : '短期记忆',
+      messageIndices: Number.isInteger(messageIndex) ? [messageIndex] : [],
+      fields: [
+        textField('at', '剧情时间', item.at, 80, false),
+        textField('text', '记忆内容', item.text, 500),
+      ],
+    });
+  }
+
+  const permanent = state.permanent && typeof state.permanent === 'object' ? state.permanent : {};
+  for (const [bucket, label] of Object.entries(EDITOR_BUCKET_LABELS)) {
+    for (const item of Array.isArray(permanent[bucket]) ? permanent[bucket] : []) {
+      const messageIndex = messageIndexForSource(state, item.sourceKey);
+      const fields = [
+        textField('at', '剧情时间', item.at, 80, false),
+        textField('text', label, item.text, 500),
+      ];
+      if (bucket === 'clues') {
+        fields.push({ name: 'status', label: '状态', value: item.status ?? '已露线索', options: [...CLUE_STATUSES] });
+      }
+      if (bucket === 'completedAgreements') {
+        fields.push(textField('refId', '对应约定 ID', item.refId, 40, false));
+      }
+      records.push({
+        key: `permanent:${bucket}:${item.id}`,
+        locator: { kind: 'permanent', bucket, id: item.id },
+        section: '长期事项',
+        title: `${label} ${item.id}`,
+        messageIndices: Number.isInteger(messageIndex) ? [messageIndex] : [],
+        fields,
+      });
+    }
+  }
+
+  for (const archive of Array.isArray(state.archives) ? state.archives : []) {
+    const messageIndices = [...new Set((archive.sources ?? [])
+      .map(item => item?.messageIndex)
+      .filter(Number.isInteger))].sort((left, right) => left - right);
+    records.push({
+      key: `archive:${archive.batch}`,
+      locator: { kind: 'archive', batch: archive.batch },
+      section: '长期归档',
+      title: `第${archive.batch}批长期归档`,
+      subtitle: `${archive.startAt ?? '时间未明'}—${archive.endAt ?? '时间未明'}`,
+      messageIndices,
+      fields: [
+        textField('summary', '客观归档', archive.summary, 2000),
+        textField('diary', '角色日记', archive.diary, 1600),
+      ],
+    });
+  }
+
+  return records;
+}
+
+function requiredEditedText(value, maximum, label) {
+  const normalized = asText(value, maximum);
+  if (!normalized) throw new Error(`${label}不能为空`);
+  return normalized;
+}
+
+/** Update the authoritative chat-metadata record selected by a UI descriptor. */
+export function updateMemoryRecord(state, locator, patch, editedAt = new Date().toISOString()) {
+  if (!state || typeof state !== 'object') throw new Error('当前聊天记忆不可用');
+  if (!locator || typeof locator !== 'object') throw new Error('记忆记录定位信息无效');
+  const changes = patch && typeof patch === 'object' ? patch : {};
+  let record = null;
+
+  if (locator.kind === 'short') {
+    record = state.short.find(item => item?.id === locator.id);
+    if (!record) throw new Error('这条短期记忆已经不存在，请刷新后再试');
+    if (Object.hasOwn(changes, 'at')) record.at = asText(changes.at, 80) || '时间未明';
+    if (Object.hasOwn(changes, 'text')) record.text = requiredEditedText(changes.text, 500, '短期记忆');
+    const ledger = state.ledger?.[record.id];
+    if (ledger) ledger.at = record.at;
+  } else if (locator.kind === 'permanent') {
+    if (!Object.hasOwn(EDITOR_BUCKET_LABELS, locator.bucket)) throw new Error('长期事项分类无效');
+    record = state.permanent?.[locator.bucket]?.find(item => item?.id === locator.id);
+    if (!record) throw new Error('这条长期事项已经不存在，请刷新后再试');
+    if (Object.hasOwn(changes, 'at')) record.at = asText(changes.at, 80) || '时间未明';
+    if (Object.hasOwn(changes, 'text')) record.text = requiredEditedText(changes.text, 500, EDITOR_BUCKET_LABELS[locator.bucket]);
+    if (locator.bucket === 'clues' && Object.hasOwn(changes, 'status')) {
+      record.status = CLUE_STATUSES.includes(changes.status) ? changes.status : (record.status ?? '已露线索');
+    }
+    if (locator.bucket === 'completedAgreements' && Object.hasOwn(changes, 'refId')) {
+      record.refId = asText(changes.refId, 40);
+    }
+  } else if (locator.kind === 'archive') {
+    record = state.archives.find(item => item?.batch === Number(locator.batch));
+    if (!record) throw new Error('这批长期归档已经不存在，请刷新后再试');
+    if (Object.hasOwn(changes, 'summary')) record.summary = requiredEditedText(changes.summary, 2000, '客观归档');
+    if (Object.hasOwn(changes, 'diary')) record.diary = requiredEditedText(changes.diary, 1600, '角色日记');
+  } else {
+    throw new Error('不支持编辑这类记忆记录');
+  }
+
+  record.editedAt = editedAt;
+  state.runtime ??= {};
+  state.runtime.lastManualEditAt = editedAt;
+  state.runtime.lastError = '';
+  return record;
 }
 
 function permanentLines(state) {

@@ -63,6 +63,10 @@
   line-height: 1.4;
 }
 
+.trace-memory-default-message-toggle {
+  margin-top: 0.7rem;
+}
+
 .trace-memory-panel select,
 .trace-memory-panel input,
 .trace-memory-panel button {
@@ -95,6 +99,168 @@
   height: auto;
   white-space: normal;
   line-height: 1.25;
+}
+
+.trace-memory-style-editor,
+.trace-memory-editor,
+.trace-memory-message-content {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.trace-memory-style-editor p,
+.trace-memory-editor-intro,
+.trace-memory-editor-empty,
+.trace-memory-record-notice {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.trace-memory-style-editor textarea {
+  width: 100%;
+  min-height: 8rem;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+}
+
+.trace-memory-style-actions,
+.trace-memory-record-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.trace-memory-style-actions .menu_button {
+  flex: 1 1 12rem;
+  min-height: 2.4rem;
+  height: auto;
+}
+
+.trace-memory-editor h4 {
+  margin: 0.35rem 0 -0.1rem;
+  color: var(--SmartThemeEmColor, currentColor);
+  font-size: 0.95em;
+}
+
+.trace-memory-record-editor {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--SmartThemeBorderColor, rgba(127, 127, 127, 0.35));
+  border-radius: 0.48rem;
+  background: color-mix(in srgb, var(--SmartThemeChatTintColor, transparent) 58%, transparent);
+}
+
+.trace-memory-record-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.7rem;
+}
+
+.trace-memory-record-header span,
+.trace-memory-record-actions span {
+  color: var(--SmartThemeEmColor, currentColor);
+  font-size: 0.78em;
+  opacity: 0.76;
+}
+
+.trace-memory-record-field {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.trace-memory-record-field > span {
+  font-size: 0.82em;
+  opacity: 0.82;
+}
+
+.trace-memory-record-field input,
+.trace-memory-record-field select,
+.trace-memory-record-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  font: inherit;
+}
+
+.trace-memory-record-field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.trace-memory-record-actions {
+  justify-content: flex-end;
+}
+
+.trace-memory-record-actions .menu_button {
+  min-width: 7.5rem;
+  min-height: 2.25rem;
+  height: auto;
+}
+
+.trace-memory-record-notice {
+  padding: 0.55rem 0.65rem;
+  border-inline-start: 0.22rem solid var(--crimson70a, #c66);
+  background: color-mix(in srgb, var(--crimson70a, #c66) 9%, transparent);
+}
+
+.trace-memory-message-panel {
+  --tm-accent: var(--SmartThemeQuoteColor, currentColor);
+  --tm-border: var(--SmartThemeBorderColor, rgba(127, 127, 127, 0.35));
+  --tm-background: color-mix(in srgb, var(--SmartThemeBlurTintColor, transparent) 62%, transparent);
+  --tm-radius: 0.55rem;
+  width: 100%;
+  margin: 0.72rem 0 0.18rem;
+  overflow: hidden;
+  border: 1px solid var(--tm-border);
+  border-inline-start: 0.25rem solid var(--tm-accent);
+  border-radius: var(--tm-radius);
+  background: var(--tm-background);
+  color: inherit;
+  font: inherit;
+}
+
+.trace-memory-message-panel > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.58rem 0.7rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 0.88em;
+}
+
+.trace-memory-message-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.trace-memory-message-panel > summary::before {
+  content: '＋';
+  color: var(--tm-accent);
+  font-weight: 700;
+}
+
+.trace-memory-message-panel[open] > summary::before {
+  content: '－';
+}
+
+.trace-memory-message-panel[open] > summary {
+  border-bottom: 1px solid var(--tm-border);
+}
+
+.trace-memory-message-content {
+  padding: 0.65rem;
+}
+
+.trace-memory-record-editor--compact {
+  padding: 0.62rem;
+  background: color-mix(in srgb, var(--SmartThemeChatTintColor, transparent) 48%, transparent);
 }
 
 .trace-memory-danger {
@@ -130,13 +296,32 @@
   .trace-memory-actions {
     grid-template-columns: 1fr;
   }
+
+  .trace-memory-style-actions,
+  .trace-memory-record-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .trace-memory-style-actions .menu_button,
+  .trace-memory-record-actions .menu_button {
+    width: 100%;
+  }
+
+  .trace-memory-record-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 @supports not (background: color-mix(in srgb, white 50%, transparent)) {
   .trace-memory-section,
   .trace-memory-status,
   .trace-memory-details,
-  .trace-memory-details pre {
+  .trace-memory-details pre,
+  .trace-memory-record-editor,
+  .trace-memory-message-panel,
+  .trace-memory-record-editor--compact {
     background: var(--SmartThemeBlurTintColor, transparent);
   }
 }

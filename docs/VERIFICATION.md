@@ -5,11 +5,12 @@
 ## 已通过
 
 - `node --check index.js` 与 `node --check src/core.mjs`：通过。
-- `node --test tests/*.test.mjs`：16 项通过，0 项失败。
+- `node --test tests/*.test.mjs`：20 项通过，0 项失败。
 - 扩展清单验证：通过；0 个错误、0 个警告、0 个未知字段。
+- 扩展清单已开启 `auto_update`；扩展 ID 与聊天存储键保持 `trace-memory`／`trace_memory_v1`，支持同仓库原地升级。
 - 能力契约样例验证：通过；必需能力无缺失，样例中无降级项。
 - JSON 解析检查：`manifest.json`、`package.json`、能力契约、扩展规格、来源快照清单与能力快照均通过。
-- 静态敏感面扫描：没有远程加载、网络请求、动态代码执行、API Key／Authorization 存储或删除聊天的指令。唯一 `innerHTML` 写入来自扩展内固定模板，不拼接聊天内容或用户输入。
+- 静态敏感面扫描：没有远程加载、网络请求、动态代码执行、API Key／Authorization 存储或删除聊天的指令。唯一 `innerHTML` 写入来自扩展内固定模板，不拼接聊天内容或用户输入；记忆文本使用 `textContent`／表单值渲染。自定义 CSS 使用 `style.textContent`，并拒绝 `@import`、`url()` 与脚本式表达式。
 - 通用性检查：运行时提示与状态路径不依赖任何特定角色名或 MVU 字段。
 
 ## 已覆盖的回归场景
@@ -24,9 +25,12 @@
 - 损坏元数据的数值夹取与数组整理。
 - quiet／impersonate 生成不请求同轮记忆包。
 - 无宿主环境导入与生命周期导出。
+- 设置页与正文栏使用同一组稳定记录定位器；短记忆、长期事项和归档的人工修改会直接改变下一轮提示读取的聊天元数据。
+- 同一批归档只保留一个权威记录描述，但可映射到该批每个来源楼层；任意映射位置修改的都是同一归档对象。
+- 新旧聊天状态都能补齐正文栏显示开关，且没有 `localStorage`、`sessionStorage` 或 IndexedDB 形式的影子记忆库。
 
 ## 尚未通过的门槛
 
-尚未在用户实际的 SillyDroid／SillyTavern 分支完成实机验收。以下行为只能由真实宿主证明，不能由上述静态结果代替：扩展安装和重载、流式输出时记忆包是否闪现、当前连接的 `generateQuietPrompt` 返回形状、该分支 `/hide`／`/unhide` 的执行与持久化、聊天切换竞态，以及手机端设置面板布局。
+尚未在用户实际的 SillyDroid／SillyTavern 分支完成实机验收。以下行为只能由真实宿主证明，不能由上述静态结果代替：扩展安装和重载、流式输出时记忆包是否闪现、当前连接的 `generateQuietPrompt` 返回形状、该分支 `/hide`／`/unhide` 的执行与持久化、聊天切换竞态、`.mes`／`.mes_text` 楼层挂载点，以及手机端正文栏和设置面板布局。
 
 实机步骤见 `REAL_HOST_ACCEPTANCE.md`。

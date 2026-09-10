@@ -4,8 +4,8 @@
   "dependencies": [],
   "js": "index.js",
   "author": "芋圆",
-  "version": "0.1.0-alpha.1",
-  "auto_update": false,
+  "version": "0.1.0-alpha.2",
+  "auto_update": true,
   "hooks": {
     "activate": "onActivate",
     "enable": "onEnable",

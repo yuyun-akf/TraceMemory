@@ -48,6 +48,13 @@
       "fallback": null
     },
     {
+      "id": "message-dom",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern DOM #chat with .mes message nodes",
+      "required": false,
+      "fallback": "正文下记忆折叠栏不显示；设置页记忆编辑器与全部记忆流程仍可使用。"
+    },
+    {
       "id": "quiet-generation",
       "owner": "sillytavern",
       "symbol": "SillyTavern.getContext.generateQuietPrompt",

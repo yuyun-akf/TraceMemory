@@ -10,12 +10,14 @@ import {
   createState,
   detectMemoryDrift,
   discardUnarchivedSources,
+  editableMemoryRecords,
   migrateState,
   normalizeSettings,
   shouldSkipGenerationType,
   sourceIdentity,
   stateStats,
   stripMemoryPacket,
+  updateMemoryRecord,
 } from '../src/core.mjs';
 
 function assistant(text, swipeId = 0) {
@@ -180,10 +182,11 @@ test('prompt is generic, carries epistemic boundaries, and supports all three mo
 });
 
 test('settings and state migration clamp unsafe numeric values', () => {
-  const settings = normalizeSettings({ batchSize: 999, keepVisible: 0, defaultMode: 'bad' });
+  const settings = normalizeSettings({ batchSize: 999, keepVisible: 0, defaultMode: 'bad', showMessageMemory: 'bad' });
   assert.equal(settings.batchSize, 50);
   assert.equal(settings.keepVisible, 2);
   assert.equal(settings.defaultMode, MODES.INLINE);
+  assert.equal(settings.showMessageMemory, true);
   const state = migrateState({
     schemaVersion: 0,
     config: { batchSize: 1 },
@@ -197,6 +200,59 @@ test('settings and state migration clamp unsafe numeric values', () => {
   assert.deepEqual(state.hidden.indices, [2, 4]);
   assert.equal(state.hidden.through, 5);
   assert.equal(state.nextIds.promise, 1);
+  assert.equal(state.config.showMessageMemory, true);
+});
+
+test('both editors resolve the same short and permanent records in chat metadata', () => {
+  const state = createState();
+  const chat = [assistant('开场'), user('一起去看海'), assistant('好，明天出发')];
+  const source = sourceIdentity(chat[2], 2, chat);
+  applyMemoryPayload(state, {
+    time: '周五傍晚',
+    short: '两人约好第二天去海边。',
+    permanent: [{ kind: 'agreement_pending', text: '第二天一起去海边。' }],
+  }, source, '2026-01-01T00:00:00Z');
+
+  const descriptors = editableMemoryRecords(state);
+  const short = descriptors.find(item => item.locator.kind === 'short');
+  const agreement = descriptors.find(item => item.locator.kind === 'permanent');
+  assert.deepEqual(short.messageIndices, [2]);
+  assert.deepEqual(agreement.messageIndices, [2]);
+
+  updateMemoryRecord(state, short.locator, { at: '周六清晨', text: '两人改为周六清晨去海边。' }, '2026-01-02T00:00:00Z');
+  updateMemoryRecord(state, agreement.locator, { at: '周六清晨', text: '周六清晨一起去海边。' }, '2026-01-02T00:00:00Z');
+  assert.equal(state.short[0].text, '两人改为周六清晨去海边。');
+  assert.equal(state.permanent.pendingAgreements[0].text, '周六清晨一起去海边。');
+  assert.equal(state.runtime.lastManualEditAt, '2026-01-02T00:00:00Z');
+  assert.match(buildInlinePrompt(state), /两人改为周六清晨去海边/);
+  assert.match(buildInlinePrompt(state), /周六清晨一起去海边/);
+});
+
+test('one archive descriptor is shared by every source floor and edits the injected archive', () => {
+  const state = createState({ batchSize: 3 });
+  const chat = [assistant('开场')];
+  for (let index = 1; index <= 3; index += 1) {
+    chat[index] = assistant(`回复${index}`);
+    applyMemoryPayload(state, {
+      short: `事件${index}`,
+      archive: index === 3 ? { summary: '旧的客观归档', diary: '旧的角色日记' } : null,
+    }, sourceIdentity(chat[index], index, chat));
+  }
+  const archive = editableMemoryRecords(state).find(item => item.locator.kind === 'archive');
+  assert.deepEqual(archive.messageIndices, [1, 2, 3]);
+  updateMemoryRecord(state, archive.locator, { summary: '人工修订后的客观归档', diary: '人工修订后的角色日记' });
+  assert.equal(state.archives[0].summary, '人工修订后的客观归档');
+  assert.match(buildInlinePrompt(state), /人工修订后的客观归档/);
+  assert.match(buildInlinePrompt(state), /人工修订后的角色日记/);
+});
+
+test('manual editor rejects empty authoritative memory text', () => {
+  const state = createState();
+  const source = sourceIdentity(assistant('回复'), 1);
+  applyMemoryPayload(state, { short: '有效事件' }, source);
+  const descriptor = editableMemoryRecords(state)[0];
+  assert.throws(() => updateMemoryRecord(state, descriptor.locator, { text: '   ' }), /不能为空/);
+  assert.equal(state.short[0].text, '有效事件');
 });
 
 test('quiet and impersonate generations never request memory packets', () => {

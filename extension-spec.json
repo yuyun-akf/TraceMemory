@@ -3,11 +3,11 @@
   "id": "trace-memory",
   "displayName": "留痕记忆 TraceMemory",
   "author": "芋圆",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "minimumClientVersion": "1.18.0",
   "loadingOrder": 20,
   "withCss": true,
-  "autoUpdate": false,
+  "autoUpdate": true,
   "requirements": [
     {
       "id": "host-context",
@@ -50,6 +50,13 @@
       "symbol": "SillyTavern.getContext.setExtensionPrompt",
       "required": true,
       "fallback": null
+    },
+    {
+      "id": "message-dom",
+      "owner": "sillytavern",
+      "symbol": "SillyTavern DOM #chat with .mes message nodes",
+      "required": false,
+      "fallback": "正文下记忆折叠栏不显示；设置页记忆编辑器与全部记忆流程仍可使用。"
     },
     {
       "id": "quiet-generation",
